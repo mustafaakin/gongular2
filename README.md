@@ -20,13 +20,14 @@ type SomeRequest struct {
 		Status int
 		Age    float64
 	}
+	error    Error
 }
 
-func (s *SomeRequest) GET(r *http.Request, wr http.ResponseWriter) error {
+func (s *SomeRequest) GET(r *http.Request, wr http.ResponseWriter) {
 	// do some stuff and set response of s to something 
 }
 
-func (s *SomeRequest) Validate(r *http.Request, wr http.ResponseWriter) error {
+func (s *SomeRequest) Validate(r *http.Request, wr http.ResponseWriter) {
 	// Custom validation logic
 }
 
