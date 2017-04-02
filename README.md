@@ -16,11 +16,6 @@ type SomeRequest struct {
 	query struct {
 		Offset int
 	}
-	response struct {
-		Status int
-		Age    float64
-	}
-	error    Error
 }
 
 func (s *SomeRequest) GET(r *http.Request, wr http.ResponseWriter) {
