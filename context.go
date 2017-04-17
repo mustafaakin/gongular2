@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+
+	"github.com/julienschmidt/httprouter"
 )
 
 // Context is an object that is alive during an HTTP Request. It holds useful information about a request and allows
@@ -17,16 +19,24 @@ type Context struct {
 	body      interface{}
 	logger    *log.Logger
 	stopChain bool
+	params    httprouter.Params
+	path      string
 }
 
 // ContextFromRequest creates a new Context object from a valid  HTTP Request.
-func contextFromRequest(w http.ResponseWriter, r *http.Request, logger *log.Logger) *Context {
+func contextFromRequest(path string, w http.ResponseWriter, r *http.Request, params httprouter.Params, logger *log.Logger) *Context {
 	return &Context{
+		path:    path,
 		r:       r,
 		w:       w,
 		headers: make(map[string]string),
 		logger:  logger,
+		params:  params,
 	}
+}
+
+func (c *Context) Params() httprouter.Params {
+	return c.params
 }
 
 // Request returns the request object so that it can be used in middlewares or handlers.

@@ -1,10 +1,9 @@
 package gongular2
 
 import (
-	"encoding/json"
+	"bytes"
 	"log"
 	"net/http"
-	"reflect"
 
 	"github.com/julienschmidt/httprouter"
 )
@@ -12,27 +11,29 @@ import (
 // Router holds the required states and does the mapping of requests
 type Router struct {
 	actualRouter *httprouter.Router
+	errorHandler ErrorHandler
 }
 
 // NewRouter creates a new gongular2 Router
 func NewRouter() *Router {
 	r := Router{
 		actualRouter: httprouter.New(),
+		errorHandler: defaultErrorHandler,
 	}
 
 	return &r
 }
 
 // GET registers the given handlers at the path
-func (r *Router) GET(path string, handlers ...Handler) {
+func (r *Router) GET(path string, handlers ...RequestHandler) {
 	// TODO: Add recover here
-	r.actualRouter.GET(path, r.transformHandler(path, handlers[0]))
+	r.actualRouter.GET(path, r.transformHandlers(path, handlers))
 }
 
 // POST registers the given handlers at the path
-func (r *Router) POST(path string, handlers ...Handler) {
+func (r *Router) POST(path string, handlers ...RequestHandler) {
 	// TODO: Add recover here
-	r.actualRouter.POST(path, r.transformHandler(path, handlers[0]))
+	r.actualRouter.POST(path, r.transformHandlers(path, handlers))
 }
 
 // ServeFiles serves the files
@@ -50,73 +51,45 @@ func (r *Router) ListenAndServe(addr string) error {
 	return http.ListenAndServe(addr, r.actualRouter)
 }
 
-func (r *Router) transformHandler(path string, handler Handler) httprouter.Handle {
-	// Handler parse parameters
-	handlerType := reflect.TypeOf(handler)
-	handlerElem := handlerType.Elem()
+func (r *Router) transformHandlers(path string, handlers []RequestHandler) httprouter.Handle {
+	middleHandlers := make([]*handlerContext, len(handlers))
 
-	// See if we have any params
-	param, paramOk := handlerElem.FieldByName("Param")
-	if paramOk {
-		// If we have something param, it should be a struct only
-		// TODO: Additional check, it should be flat struct
-		// TODO: Additional check, it should be compatible with path
-		if param.Type.Kind() != reflect.Struct {
-			panic("Param field added but it is not a struct")
-		}
+	for i, handler := range handlers {
+		mh, _ := transformHandler(path, handler)
+		// TODO: Error handle
+		middleHandlers[i] = mh
 	}
 
-	query, queryOk := handlerElem.FieldByName("Query")
-	if queryOk {
-		// If we have something param, it should be a struct only
-		// TODO: Additional check, it should be flat struct
-		// TODO: Additional check, it should be compatible with path
-		if query.Type.Kind() != reflect.Struct {
-			panic("Query field added but it is not a struct")
-		}
-	}
+	var fn httprouter.Handle
+	fn = func(wr http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+		// Create a logger for each request so that we can group the output
+		buf := new(bytes.Buffer)
+		logger := log.New(buf, "", log.LstdFlags)
 
-	_, bodyOk := handlerElem.FieldByName("Body")
+		// Create a context that wraps the request, writer and logger
+		ctx := contextFromRequest(path, wr, req, ps, logger)
 
-	// TODO: In the future, analyze all the handlers and decide if we have any shared stuff (params, dependencies etc.) so we do not re-init them
-	return func(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
-		// TODO: Modify it to handle more than one handler later
-		ctx := contextFromRequest(w, req, nil)
-		_ = ctx
-		// Create a new handler here
+		// For each of the handler this route has, try to execute it
+		for _, handler := range middleHandlers {
+			// Parse the parameters to the handler object
+			fn := handler.requestHandler
+			err := fn(ctx)
 
-		newHandler := reflect.New(handlerElem)
-		newHandlerElem := newHandler.Elem()
-		if paramOk {
-			param := newHandlerElem.FieldByName("Param")
-			paramType := param.Type()
-
-			numFields := paramType.NumField()
-			for i := 0; i < numFields; i++ {
-				field := paramType.Field(i)
-				s := ps.ByName(field.Name)
-				param.Field(i).SetString(s)
-			}
-		}
-
-		if queryOk {
-
-		}
-
-		if bodyOk {
-			body := newHandlerElem.FieldByName("Body")
-			b := body.Addr().Interface()
-
-			err := json.NewDecoder(req.Body).Decode(b)
+			// If an error occurs, stop the chain
 			if err != nil {
-				log.Println("could not decode", err)
+				ctx.StopChain()
+				r.errorHandler(err, ctx)
+				break
+			}
+
+			if ctx.stopChain {
+				break
 			}
 		}
 
-		// Convert it to an interface and call its handle method which may modify the context
-		handlerInterface := newHandler.Interface().(Handler)
-		handlerInterface.Handle(ctx)
-
-		json.NewEncoder(w).Encode(ctx.body)
+		// Finalize the reuqest in the end
+		ctx.Finalize()
 	}
+
+	return fn
 }
