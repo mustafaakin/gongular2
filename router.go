@@ -5,6 +5,8 @@ import (
 	"log"
 	"net/http"
 
+	"path"
+
 	"github.com/julienschmidt/httprouter"
 )
 
@@ -12,6 +14,9 @@ import (
 type Router struct {
 	actualRouter *httprouter.Router
 	errorHandler ErrorHandler
+	injector     *injector
+	prefix       string
+	handlers     []RequestHandler
 }
 
 // NewRouter creates a new gongular2 Router
@@ -19,6 +24,9 @@ func NewRouter() *Router {
 	r := Router{
 		actualRouter: httprouter.New(),
 		errorHandler: defaultErrorHandler,
+		injector:     newInjector(),
+		prefix:       "",
+		handlers:     make([]RequestHandler, 0),
 	}
 
 	return &r
@@ -49,6 +57,42 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // ListenAndServe is
 func (r *Router) ListenAndServe(addr string) error {
 	return http.ListenAndServe(addr, r.actualRouter)
+}
+
+// Group groups a given path with additional interfaces. It is useful to avoid
+// repetitions while defining many paths
+func (r *Router) Group(_path string, handlers ...RequestHandler) *Router {
+	newRouter := &Router{
+		actualRouter: r.actualRouter,
+		injector:     r.injector,
+		prefix:       path.Join(r.prefix, _path),
+		errorHandler: r.errorHandler,
+	}
+
+	// Copy previous handlers references
+	newRouter.handlers = make([]RequestHandler, len(r.handlers))
+	copy(newRouter.handlers, r.handlers)
+
+	// Append new handlers
+	newRouter.handlers = append(newRouter.handlers, handlers...)
+
+	return newRouter
+}
+
+// subpath initiates a new route with path and handlers, useful for grouping
+func (r *Router) subpath(_path string, handlers []RequestHandler) (string, []RequestHandler) {
+	combinedHandlers := r.handlers
+	combinedHandlers = append(combinedHandlers, handlers...)
+
+	resultingPath := path.Join(r.prefix, _path)
+	return resultingPath, combinedHandlers
+}
+
+func (r *Router) combineAndWrapHandlers(path, method string, handlers ...RequestHandler) {
+	resultingPath, combinedHandlers := r.subpath(path, handlers)
+	fn := r.transformHandlers(resultingPath, combinedHandlers)
+
+	r.actualRouter.GET(resultingPath, fn)
 }
 
 func (r *Router) transformHandlers(path string, handlers []RequestHandler) httprouter.Handle {
@@ -87,7 +131,7 @@ func (r *Router) transformHandlers(path string, handlers []RequestHandler) httpr
 			}
 		}
 
-		// Finalize the reuqest in the end
+		// Finalize the request in the end
 		ctx.Finalize()
 	}
 
