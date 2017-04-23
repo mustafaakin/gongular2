@@ -35,7 +35,7 @@ func NewRouter() *Router {
 // GET registers the given handlers at the path
 func (r *Router) GET(path string, handlers ...RequestHandler) {
 	// TODO: Add recover here
-	r.actualRouter.GET(path, r.transformHandlers(path, handlers))
+	r.combineAndWrapHandlers(path, http.MethodGet, handlers...)
 }
 
 // POST registers the given handlers at the path
@@ -99,7 +99,7 @@ func (r *Router) transformHandlers(path string, handlers []RequestHandler) httpr
 	middleHandlers := make([]*handlerContext, len(handlers))
 
 	for i, handler := range handlers {
-		mh, _ := transformHandler(path, handler)
+		mh, _ := transformHandler(path, r.injector, handler)
 		// TODO: Error handle
 		middleHandlers[i] = mh
 	}
@@ -136,4 +136,12 @@ func (r *Router) transformHandlers(path string, handlers []RequestHandler) httpr
 	}
 
 	return fn
+}
+
+func (r *Router) Provide(value interface{}) {
+	r.injector.Provide(value, "default")
+}
+
+func (r *Router) ProvideWithKey(key string, value interface{}) {
+	r.injector.Provide(value, key)
 }

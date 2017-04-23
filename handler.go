@@ -14,10 +14,11 @@ type middleRequestHandler func(c *Context) error
 
 type handlerContext struct {
 	// The analyzed reflection data so that we can cache it
-	param bool
-	query bool
-	body  bool
-	form  bool
+	param     bool
+	query     bool
+	body      bool
+	form      bool
+	injection bool
 
 	// HandlerType
 	tip reflect.Type
@@ -26,7 +27,7 @@ type handlerContext struct {
 	requestHandler middleRequestHandler
 }
 
-func transformHandler(path string, handler RequestHandler) (*handlerContext, error) {
+func transformHandler(path string, injector *injector, handler RequestHandler) (*handlerContext, error) {
 	hc := handlerContext{}
 
 	// Handler parse parameters
@@ -61,11 +62,22 @@ func transformHandler(path string, handler RequestHandler) (*handlerContext, err
 	_, formOk := handlerElem.FieldByName("Form")
 	hc.form = formOk
 
-	hc.requestHandler = hc.getMiddleRequestHandler()
+	for i := 0; i < handlerElem.NumField(); i++ {
+		name := handlerElem.Field(i).Name
+		if name == "Body" || name == "Form" || name == "Query" || name == "Param" {
+			continue
+		} else {
+			// TODO: Check if we can set it!, is the field exported?
+			hc.injection = true
+			break
+		}
+	}
+
+	hc.requestHandler = hc.getMiddleRequestHandler(injector)
 	return &hc, nil
 }
 
-func (hc *handlerContext) getMiddleRequestHandler() middleRequestHandler {
+func (hc *handlerContext) getMiddleRequestHandler(injector *injector) middleRequestHandler {
 	// Create a new handler here
 	fn := func(c *Context) error {
 		obj := reflect.New(hc.tip)
@@ -91,6 +103,13 @@ func (hc *handlerContext) getMiddleRequestHandler() middleRequestHandler {
 		}
 		if hc.form {
 			err := c.parseForm(objElem)
+			if err != nil {
+				return err
+			}
+		}
+
+		if hc.injection {
+			err := c.parseInjections(objElem, injector)
 			if err != nil {
 				return err
 			}

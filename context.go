@@ -21,6 +21,7 @@ type Context struct {
 	stopChain bool
 	params    httprouter.Params
 	path      string
+	cache     map[string]interface{}
 }
 
 // ContextFromRequest creates a new Context object from a valid  HTTP Request.
@@ -32,6 +33,7 @@ func contextFromRequest(path string, w http.ResponseWriter, r *http.Request, par
 		headers: make(map[string]string),
 		logger:  logger,
 		params:  params,
+		cache:   make(map[string]interface{}),
 	}
 }
 
