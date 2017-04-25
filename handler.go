@@ -3,6 +3,10 @@ package gongular2
 import (
 	"errors"
 	"reflect"
+
+	"net/http"
+
+	"github.com/gorilla/websocket"
 )
 
 // RequestHandler is a generic handler for gongular2
@@ -13,6 +17,8 @@ type RequestHandler interface {
 type middleRequestHandler func(c *Context) error
 
 type handlerContext struct {
+	websocket bool
+	method    string
 	// The analyzed reflection data so that we can cache it
 	param     bool
 	query     bool
@@ -27,12 +33,14 @@ type handlerContext struct {
 	requestHandler middleRequestHandler
 }
 
-func transformHandler(path string, injector *injector, handler RequestHandler) (*handlerContext, error) {
+func transformHandler(path string, method string, websocket bool, injector *injector, handler interface{}) (*handlerContext, error) {
 	hc := handlerContext{}
 
 	// Handler parse parameters
 	handlerElem := reflect.TypeOf(handler).Elem()
 	hc.tip = handlerElem
+	hc.websocket = websocket
+	hc.method = method
 
 	// See if we have any params
 	param, paramOk := handlerElem.FieldByName("Param")
@@ -57,10 +65,22 @@ func transformHandler(path string, injector *injector, handler RequestHandler) (
 	hc.query = queryOk
 
 	_, bodyOk := handlerElem.FieldByName("Body")
-	hc.body = bodyOk
-
 	_, formOk := handlerElem.FieldByName("Form")
+
+	if websocket {
+		if bodyOk || formOk {
+			return nil, errors.New("The websocket request handler cannot have body or form")
+		}
+	}
+
+	if method == http.MethodGet {
+		if bodyOk || formOk {
+			return nil, errors.New("A GET request handler cannot have body or form")
+		}
+	}
+
 	hc.form = formOk
+	hc.body = bodyOk
 
 	for i := 0; i < handlerElem.NumField(); i++ {
 		name := handlerElem.Field(i).Name
@@ -89,18 +109,21 @@ func (hc *handlerContext) getMiddleRequestHandler(injector *injector) middleRequ
 				return err
 			}
 		}
-		if hc.body {
-			err := c.parseBody(objElem)
-			if err != nil {
-				return err
-			}
-		}
+
 		if hc.query {
 			err := c.parseQuery(objElem)
 			if err != nil {
 				return err
 			}
 		}
+
+		if hc.body {
+			err := c.parseBody(objElem)
+			if err != nil {
+				return err
+			}
+		}
+
 		if hc.form {
 			err := c.parseForm(objElem)
 			if err != nil {
@@ -115,12 +138,38 @@ func (hc *handlerContext) getMiddleRequestHandler(injector *injector) middleRequ
 			}
 		}
 
-		reqHandler, ok := obj.Interface().(RequestHandler)
-		if !ok {
-			// It should, it cannot be here
-			return errors.New("The interface does not implement RequestHandler: " + hc.tip.Name())
+		if hc.websocket {
+			wsHandler, ok := obj.Interface().(WebsocketHandler)
+			if !ok {
+				// It should, it cannot be here
+				return errors.New("The interface does not implement WebsocketHandler: " + hc.tip.Name())
+			} else {
+				err := wsHandler.Before(c)
+				if err != nil {
+					return err
+				}
+
+				var upgrader = websocket.Upgrader{
+					ReadBufferSize:  1024,
+					WriteBufferSize: 1024,
+				}
+
+				conn, err := upgrader.Upgrade(c.w, c.r, nil)
+				if err != nil {
+					return err
+				}
+
+				wsHandler.Handle(conn)
+				return nil
+			}
 		} else {
-			return reqHandler.Handle(c)
+			reqHandler, ok := obj.Interface().(RequestHandler)
+			if !ok {
+				// It should, it cannot be here
+				return errors.New("The interface does not implement RequestHandler: " + hc.tip.Name())
+			} else {
+				return reqHandler.Handle(c)
+			}
 		}
 	}
 	return fn
