@@ -92,14 +92,14 @@ func transformRequestHandler(path string, method string, injector *injector, han
 }
 
 func transformWebsocketHandler(path string, injector *injector, handler WebsocketHandler) (*handlerContext, error) {
-	whc := &handlerContext{
+	hc := &handlerContext{
 		websocket: true,
 	}
 
 	// Handler parse parameters
 	handlerElem := reflect.TypeOf(handler).Elem()
 
-	whc.tip = handlerElem
+	hc.tip = handlerElem
 
 	// See if we have any params
 	param, paramOk := handlerElem.FieldByName("Param")
@@ -111,7 +111,7 @@ func transformWebsocketHandler(path string, injector *injector, handler Websocke
 			return nil, errors.New("Param field added but it is not a struct")
 		}
 	}
-	whc.param = paramOk
+	hc.param = paramOk
 
 	query, queryOk := handlerElem.FieldByName("Query")
 	if queryOk {
@@ -122,9 +122,9 @@ func transformWebsocketHandler(path string, injector *injector, handler Websocke
 		}
 	}
 
-	whc.query = queryOk
-	whc.RequestHandler = whc.getMiddleRequestHandler(injector)
-	return whc, nil
+	hc.query = queryOk
+	hc.RequestHandler = hc.getMiddleRequestHandler(injector)
+	return hc, nil
 }
 
 func (hc *handlerContext) getMiddleRequestHandler(injector *injector) middleRequestHandler {
