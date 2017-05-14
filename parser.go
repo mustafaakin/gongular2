@@ -21,7 +21,6 @@ type ParseError struct {
 
 }
 
-
 func (c *Context) parseParams(handlerObject reflect.Value) error {
 	param := handlerObject.FieldByName("Param")
 	paramType := param.Type()

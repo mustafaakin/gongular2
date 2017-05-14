@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"log"
 
+	"time"
+
+	"github.com/gorilla/websocket"
 	"github.com/mustafaakin/gongular2"
 )
 
@@ -37,17 +40,53 @@ func (s *someOtherRequest) Handle(c *gongular2.Context) error {
 	return nil
 }
 
+type wsTest struct {
+	Param struct {
+		UserID string
+	}
+}
+
+func (w *wsTest) Before(c *gongular2.Context) error {
+	return nil
+}
+
+func (w *wsTest) Handle(conn *websocket.Conn) {
+	conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Selam kullanıcı %s", w.Param.UserID)))
+	go func() {
+		for i := 0; i < 10; i++ {
+			err := conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Selam kullanıcı %s", w.Param.UserID)))
+			if err != nil {
+				log.Println(err)
+			}
+			time.Sleep(time.Millisecond * 1000)
+		}
+	}()
+
+	for {
+		t, p, err := conn.ReadMessage()
+		log.Println(t, string(p))
+		if err != nil {
+			break
+		}
+	}
+}
+
 func main() {
-	r := gongular2.NewRouter()
+	// Create a new router
+	e := gongular2.NewEngine()
 
-	r.ProvideWithKey("m1", MyInt(45))
-	r.ProvideWithKey("m2", MyInt(30))
+	// Interfaces
+	e.ProvideWithKey("m1", MyInt(45))
+	e.ProvideWithKey("m2", MyInt(30))
 
+	// HTTP Handlers
+	r := e.GetRouter()
 	r.POST("/test/:UserID/sayHi", &someRequest{})
 	r.GET("/aa", &someOtherRequest{})
-	g1 := r.Group("/deneme")
-	g1.GET("/bb", &someOtherRequest{})
 
-	log.Println("starting")
-	log.Fatal(r.ListenAndServe(":8080"))
+	// WS Handlers
+	w := e.GetWSRouter()
+	w.Handle("/ws/:UserID/test", &wsTest{})
+
+	log.Fatal(e.ListenAndServe(":8000"))
 }

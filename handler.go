@@ -17,8 +17,8 @@ type RequestHandler interface {
 type middleRequestHandler func(c *Context) error
 
 type handlerContext struct {
-	websocket bool
 	method    string
+	websocket bool
 	// The analyzed reflection data so that we can cache it
 	param     bool
 	query     bool
@@ -30,17 +30,17 @@ type handlerContext struct {
 	tip reflect.Type
 
 	// The actual function
-	requestHandler middleRequestHandler
+	RequestHandler middleRequestHandler
 }
 
-func transformHandler(path string, method string, websocket bool, injector *injector, handler interface{}) (*handlerContext, error) {
-	hc := handlerContext{}
+func transformRequestHandler(path string, method string, injector *injector, handler RequestHandler) (*handlerContext, error) {
+	rhc := handlerContext{}
 
 	// Handler parse parameters
 	handlerElem := reflect.TypeOf(handler).Elem()
-	hc.tip = handlerElem
-	hc.websocket = websocket
-	hc.method = method
+
+	rhc.tip = handlerElem
+	rhc.method = method
 
 	// See if we have any params
 	param, paramOk := handlerElem.FieldByName("Param")
@@ -52,7 +52,7 @@ func transformHandler(path string, method string, websocket bool, injector *inje
 			return nil, errors.New("Param field added but it is not a struct")
 		}
 	}
-	hc.param = paramOk
+	rhc.param = paramOk
 
 	query, queryOk := handlerElem.FieldByName("Query")
 	if queryOk {
@@ -62,16 +62,10 @@ func transformHandler(path string, method string, websocket bool, injector *inje
 			return nil, errors.New("Query field added but it is not a struct")
 		}
 	}
-	hc.query = queryOk
+	rhc.query = queryOk
 
 	_, bodyOk := handlerElem.FieldByName("Body")
 	_, formOk := handlerElem.FieldByName("Form")
-
-	if websocket {
-		if bodyOk || formOk {
-			return nil, errors.New("The websocket request handler cannot have body or form")
-		}
-	}
 
 	if method == http.MethodGet {
 		if bodyOk || formOk {
@@ -79,8 +73,8 @@ func transformHandler(path string, method string, websocket bool, injector *inje
 		}
 	}
 
-	hc.form = formOk
-	hc.body = bodyOk
+	rhc.form = formOk
+	rhc.body = bodyOk
 
 	for i := 0; i < handlerElem.NumField(); i++ {
 		name := handlerElem.Field(i).Name
@@ -88,13 +82,49 @@ func transformHandler(path string, method string, websocket bool, injector *inje
 			continue
 		} else {
 			// TODO: Check if we can set it!, is the field exported?
-			hc.injection = true
+			rhc.injection = true
 			break
 		}
 	}
 
-	hc.requestHandler = hc.getMiddleRequestHandler(injector)
-	return &hc, nil
+	rhc.RequestHandler = rhc.getMiddleRequestHandler(injector)
+	return &rhc, nil
+}
+
+func transformWebsocketHandler(path string, injector *injector, handler WebsocketHandler) (*handlerContext, error) {
+	whc := &handlerContext{
+		websocket: true,
+	}
+
+	// Handler parse parameters
+	handlerElem := reflect.TypeOf(handler).Elem()
+
+	whc.tip = handlerElem
+
+	// See if we have any params
+	param, paramOk := handlerElem.FieldByName("Param")
+	if paramOk {
+		// If we have something param, it should be a struct only
+		// TODO: Additional check, it should be flat struct
+		// TODO: Additional check, it should be compatible with path
+		if param.Type.Kind() != reflect.Struct {
+			return nil, errors.New("Param field added but it is not a struct")
+		}
+	}
+	whc.param = paramOk
+
+	query, queryOk := handlerElem.FieldByName("Query")
+	if queryOk {
+		// If we have something param, it should be a struct only
+		// TODO: Additional check, it should be flat struct
+		if query.Type.Kind() != reflect.Struct {
+			return nil, errors.New("Query field added but it is not a struct")
+		}
+	}
+
+	whc.query = queryOk
+	whc.RequestHandler = whc.getMiddleRequestHandler(injector)
+	return whc, nil
 }
 
 func (hc *handlerContext) getMiddleRequestHandler(injector *injector) middleRequestHandler {
@@ -117,6 +147,7 @@ func (hc *handlerContext) getMiddleRequestHandler(injector *injector) middleRequ
 			}
 		}
 
+		// TODO: Add ws check
 		if hc.body {
 			err := c.parseBody(objElem)
 			if err != nil {
