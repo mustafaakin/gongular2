@@ -98,6 +98,7 @@ func (c *Context) Finalize() int {
 			c.w.WriteHeader(c.status)
 			c.w.Write(v)
 		} else {
+			// TODO: Do it only if not content-type is not already set?
 			c.w.Header().Set("Content-type", "application/json")
 			c.w.WriteHeader(c.status)
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/mustafaakin/gongular2"
+	"github.com/mustafaakin/gongular2/deneme"
 )
 
 type MyInt int
@@ -33,16 +34,19 @@ func (s *someRequest) Handle(c *gongular2.Context) error {
 }
 
 type someOtherRequest struct {
+	Param struct {
+		UserID int8
+	}
 }
 
 func (s *someOtherRequest) Handle(c *gongular2.Context) error {
-	c.SetBody("hi")
+	c.SetBody(fmt.Sprintf("hi %d", s.Param.UserID))
 	return nil
 }
 
 type wsTest struct {
 	Param struct {
-		UserID string
+		UserID int
 	}
 }
 
@@ -51,10 +55,10 @@ func (w *wsTest) Before(c *gongular2.Context) error {
 }
 
 func (w *wsTest) Handle(conn *websocket.Conn) {
-	conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Selam kullanıcı %s", w.Param.UserID)))
+	conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Selam kullanıcı %d", w.Param.UserID)))
 	go func() {
 		for i := 0; i < 10; i++ {
-			err := conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Selam kullanıcı %s", w.Param.UserID)))
+			err := conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Selam kullanıcı %d", w.Param.UserID)))
 			if err != nil {
 				log.Println(err)
 			}
@@ -82,7 +86,8 @@ func main() {
 	// HTTP Handlers
 	r := e.GetRouter()
 	r.POST("/test/:UserID/sayHi", &someRequest{})
-	r.GET("/aa", &someOtherRequest{})
+	r.GET("/user/:UserID", &someOtherRequest{})
+	r.GET("/deneme", &deneme.SelamMid{}, &deneme.SelamFn{})
 
 	// WS Handlers
 	w := e.GetWSRouter()

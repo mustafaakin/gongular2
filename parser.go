@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
+	"strings"
 )
 
 type InjectionError struct {
@@ -18,7 +20,56 @@ func (i *InjectionError) Error() string {
 }
 
 type ParseError struct {
+	Location  string
+	FieldName string
+	Reason    string
+}
 
+func (p *ParseError) Error() string {
+	return fmt.Sprintf("Parse error: %s %s %s", p.Location, p.FieldName, p.Reason)
+}
+
+func checkIntRange(kind reflect.Kind, val int64) bool {
+	// TODO: int8 -> -127+128 etc
+	return false
+}
+
+func parseSimpleParam(s string, field reflect.StructField, val *reflect.Value) *ParseError {
+	switch field.Type.Kind() {
+	case reflect.String:
+		val.SetString(s)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		i, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return &ParseError{
+				FieldName: field.Name,
+				Reason:    fmt.Sprintf("The '%s' is not parseable to int", s),
+			}
+		}
+		val.SetInt(i)
+	case reflect.Float32, reflect.Float64:
+		i, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			return &ParseError{
+				FieldName: field.Name,
+				Reason:    fmt.Sprintf("The '%s' is not parseable to float/double", s),
+			}
+		}
+		val.SetFloat(i)
+	case reflect.Bool:
+		switch strings.ToLower(s) {
+		case "true", "1", "yes":
+			val.SetBool(true)
+		case "false", "0", "no":
+			val.SetBool(false)
+		default:
+			return &ParseError{
+				FieldName: field.Name,
+				Reason:    fmt.Sprintf("The '%s' is not a boolean", s),
+			}
+		}
+	}
+	return nil
 }
 
 func (c *Context) parseParams(handlerObject reflect.Value) error {
@@ -28,9 +79,15 @@ func (c *Context) parseParams(handlerObject reflect.Value) error {
 	numFields := paramType.NumField()
 	for i := 0; i < numFields; i++ {
 		field := paramType.Field(i)
+
 		// TODO: Parse it accordingly, int-string
 		s := c.Params().ByName(field.Name)
-		param.Field(i).SetString(s)
+		val := param.Field(i)
+		err := parseSimpleParam(s, field, &val)
+		if err != nil {
+			err.Location = "URL Parameter"
+			return err
+		}
 	}
 	return nil
 }
@@ -54,7 +111,12 @@ func (c *Context) parseQuery(obj reflect.Value) error {
 		field := queryType.Field(i)
 		// TODO: Parse it accordingly, int-string
 		s := queryValues.Get(field.Name)
-		query.Field(i).SetString(s)
+		val := query.Field(i)
+		err := parseSimpleParam(s, field, &val)
+		if err != nil {
+			err.Location = "URL Parameter"
+			return err
+		}
 	}
 	return nil
 }

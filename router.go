@@ -7,6 +7,8 @@ import (
 
 	"path"
 
+	"time"
+
 	"github.com/julienschmidt/httprouter"
 )
 
@@ -100,6 +102,13 @@ func (r *Router) transformRequestHandlers(path string, method string, handlers [
 
 	var fn httprouter.Handle
 	fn = func(wr http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+		st := time.Now()
+		routeStat := RouteStat{
+			Request:     req,
+			MatchedPath: path,
+			Handlers:    make([]HandlerStat, len(middleHandlers)),
+		}
+
 		// Create a logger for each request so that we can group the output
 		buf := new(bytes.Buffer)
 		logger := log.New(buf, "", log.LstdFlags)
@@ -108,24 +117,53 @@ func (r *Router) transformRequestHandlers(path string, method string, handlers [
 		ctx := contextFromRequest(path, wr, req, ps, logger)
 
 		// For each of the handler this route has, try to execute it
-		for _, handler := range middleHandlers {
+		for idx, handler := range middleHandlers {
+			st := time.Now()
+			hc := HandlerStat{
+				FuncName: handler.name,
+			}
+
 			// Parse the parameters to the handler object
 			fn := handler.RequestHandler
 			err := fn(ctx)
+
+			hc.Duration = time.Now().Sub(st)
 
 			// If an error occurs, stop the chain
 			if err != nil {
 				ctx.StopChain()
 				r.errorHandler(err, ctx)
+
+				// Put the route stats
+				hc.Error = err
+				hc.StopChain = true
+				routeStat.Handlers[idx] = hc
+
 				break
 			}
 
+			// Voluntarily stopped
 			if ctx.stopChain {
+				// Put the route stats
+				hc.Duration = time.Now().Sub(st)
+				hc.StopChain = true
+				routeStat.Handlers[idx] = hc
+
 				break
 			}
+
+			routeStat.Handlers[idx] = hc
 		}
 
-		ctx.Finalize()
+		// Save final stats
+		routeStat.ResponseSize = ctx.Finalize()
+		routeStat.ResponseCode = ctx.status
+		routeStat.TotalDuration = time.Now().Sub(st)
+		routeStat.Logs = buf
+
+		if r.engine.callback != nil {
+			r.engine.callback(routeStat)
+		}
 	}
 
 	return fn

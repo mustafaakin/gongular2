@@ -17,12 +17,16 @@ type Engine struct {
 	httpRouter *Router
 	// WS Router
 	wsRouter *WSRouter
+
+	// The callback for route callbacks
+	callback RouteCallback
 }
 
 func NewEngine() *Engine {
 	e := &Engine{
 		actualRouter: httprouter.New(),
 		injector:     newInjector(),
+		callback:     DefaultRouteCallback,
 	}
 
 	e.httpRouter = newRouter(e)

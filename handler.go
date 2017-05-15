@@ -6,6 +6,8 @@ import (
 
 	"net/http"
 
+	"fmt"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -18,6 +20,7 @@ type middleRequestHandler func(c *Context) error
 
 type handlerContext struct {
 	method    string
+	name      string
 	websocket bool
 	// The analyzed reflection data so that we can cache it
 	param     bool
@@ -35,9 +38,9 @@ type handlerContext struct {
 
 func transformRequestHandler(path string, method string, injector *injector, handler RequestHandler) (*handlerContext, error) {
 	rhc := handlerContext{}
-
 	// Handler parse parameters
 	handlerElem := reflect.TypeOf(handler).Elem()
+	rhc.name = fmt.Sprintf("%s.%s", handlerElem.PkgPath(), handlerElem.Name())
 
 	rhc.tip = handlerElem
 	rhc.method = method
@@ -147,18 +150,20 @@ func (hc *handlerContext) getMiddleRequestHandler(injector *injector) middleRequ
 			}
 		}
 
-		// TODO: Add ws check
-		if hc.body {
-			err := c.parseBody(objElem)
-			if err != nil {
-				return err
+		// ws is a get request, so it cannot have neither body or form
+		if !hc.websocket {
+			if hc.body {
+				err := c.parseBody(objElem)
+				if err != nil {
+					return err
+				}
 			}
-		}
 
-		if hc.form {
-			err := c.parseForm(objElem)
-			if err != nil {
-				return err
+			if hc.form {
+				err := c.parseForm(objElem)
+				if err != nil {
+					return err
+				}
 			}
 		}
 
