@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+
+	"github.com/asaskevich/govalidator"
 )
 
 type InjectionError struct {
@@ -17,6 +19,19 @@ type InjectionError struct {
 
 func (i *InjectionError) Error() string {
 	return fmt.Sprintf("Could not inject type %s with key %s because %s", i.Key, i.Tip, i.UnderlyingError.Error())
+}
+
+type ValidationError struct {
+	Fields   map[string]string
+	Location string
+}
+
+func (v *ValidationError) Error() string {
+	s := []string{}
+	for k, v := range v.Fields {
+		s = append(s, fmt.Sprintf("%s: %s", k, v))
+	}
+	return fmt.Sprintf("Validation error in %s, %s", v.Location, strings.Join(s, ","))
 }
 
 type ParseError struct {
@@ -72,8 +87,20 @@ func parseSimpleParam(s string, field reflect.StructField, val *reflect.Value) *
 	return nil
 }
 
-func (c *Context) parseParams(handlerObject reflect.Value) error {
-	param := handlerObject.FieldByName("Param")
+func validateStruct(obj reflect.Value, location string) *ValidationError {
+	isValid, err := govalidator.ValidateStruct(obj.Interface())
+	if !isValid {
+		m := govalidator.ErrorsByField(err)
+		return &ValidationError{
+			Location: location,
+			Fields:   m,
+		}
+	}
+	return nil
+}
+
+func (c *Context) parseParams(obj reflect.Value) error {
+	param := obj.FieldByName("Param")
 	paramType := param.Type()
 
 	numFields := paramType.NumField()
@@ -89,6 +116,9 @@ func (c *Context) parseParams(handlerObject reflect.Value) error {
 			return err
 		}
 	}
+
+	err := validateStruct(obj, "Parameter")
+	
 	return nil
 }
 
@@ -126,7 +156,8 @@ func (c *Context) parseForm(obj reflect.Value) error {
 	// TODO: Cache the files in the context so that we do not re-read it unnecessarily
 	contentType := c.Request().Header.Get("Content-Type")
 
-	if contentType == "multipart/form-data" {
+	// TODO: Instead of header-check, check if we have files only
+	if strings.Contains(contentType, "multipart/form-data") {
 		err := c.Request().ParseMultipartForm(10 * 1024 * 1024) // 10 MB??
 		if err != nil {
 			return err

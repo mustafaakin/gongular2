@@ -6,6 +6,8 @@ import (
 
 	"time"
 
+	"io/ioutil"
+
 	"github.com/gorilla/websocket"
 	"github.com/mustafaakin/gongular2"
 	"github.com/mustafaakin/gongular2/deneme"
@@ -33,14 +35,26 @@ func (s *someRequest) Handle(c *gongular2.Context) error {
 	return nil
 }
 
+type FileuploadHandler struct {
+	Form struct {
+		File1 *gongular2.UploadedFile
+	}
+}
+
+func (f *FileuploadHandler) Handle(c *gongular2.Context) error {
+	b, err := ioutil.ReadAll(f.Form.File1.File)
+	log.Println("file", len(b), err)
+	return nil
+}
+
 type someOtherRequest struct {
 	Param struct {
-		UserID int8
+		UserID string `valid:"alphanum"`
 	}
 }
 
 func (s *someOtherRequest) Handle(c *gongular2.Context) error {
-	c.SetBody(fmt.Sprintf("hi %d", s.Param.UserID))
+	c.SetBody(fmt.Sprintf("hi %s", s.Param.UserID))
 	return nil
 }
 
@@ -88,6 +102,7 @@ func main() {
 	r.POST("/test/:UserID/sayHi", &someRequest{})
 	r.GET("/user/:UserID", &someOtherRequest{})
 	r.GET("/deneme", &deneme.SelamMid{}, &deneme.SelamFn{})
+	r.POST("/filetest", &FileuploadHandler{})
 
 	// WS Handlers
 	w := e.GetWSRouter()
