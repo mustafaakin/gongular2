@@ -5,13 +5,14 @@ import (
 	"log"
 	"net/http"
 
+	"reflect"
+
 	"github.com/julienschmidt/httprouter"
 )
 
 // Context is an object that is alive during an HTTP Request. It holds useful information about a request and allows
 // the gongular to hold the information, then serialize it to the client whenever all handlers are finished.
 type Context struct {
-	// TODO: Add dependency and others cache here
 	r         *http.Request
 	w         http.ResponseWriter
 	status    int
@@ -21,22 +22,24 @@ type Context struct {
 	stopChain bool
 	params    httprouter.Params
 	path      string
-	cache     map[string]interface{}
+
+	injectCache map[reflect.Type]map[string]interface{}
 }
 
 // ContextFromRequest creates a new Context object from a valid  HTTP Request.
 func contextFromRequest(path string, w http.ResponseWriter, r *http.Request, params httprouter.Params, logger *log.Logger) *Context {
 	return &Context{
-		path:    path,
-		r:       r,
-		w:       w,
-		headers: make(map[string]string),
-		logger:  logger,
-		params:  params,
-		cache:   make(map[string]interface{}),
+		path:        path,
+		r:           r,
+		w:           w,
+		headers:     make(map[string]string),
+		logger:      logger,
+		params:      params,
+		injectCache: make(map[reflect.Type]map[string]interface{}),
 	}
 }
 
+// Params returns the URL parameters of the request
 func (c *Context) Params() httprouter.Params {
 	return c.params
 }
@@ -96,21 +99,45 @@ func (c *Context) Finalize() int {
 	if c.body != nil {
 		if v, ok := c.body.([]byte); ok {
 			c.w.WriteHeader(c.status)
-			c.w.Write(v)
-		} else {
-			// TODO: Do it only if not content-type is not already set?
-			c.w.Header().Set("Content-type", "application/json")
-			c.w.WriteHeader(c.status)
-
-			b, _ := json.MarshalIndent(c.body, "", "  ")
-			bytes, err := c.w.Write(b)
+			bytes, err := c.w.Write(v)
 			if err != nil {
-				// TODO: Handle it properly
+				c.logger.Println("Could not write the response", err)
 			}
 			return bytes
 		}
-	} else {
+
+		b, err := json.MarshalIndent(c.body, "", "  ")
+		if err != nil {
+			c.logger.Println("Could not serialize the response", err)
+			return -1
+		}
+
+		c.w.Header().Set("Content-type", "application/json")
 		c.w.WriteHeader(c.status)
+
+		bytes, err := c.w.Write(b)
+		if err != nil {
+			c.logger.Println(err)
+		}
+		return bytes
 	}
+
+	c.w.WriteHeader(c.status)
 	return 0
+}
+
+func (c *Context) getCachedInjection(tip reflect.Type, key string) (interface{}, bool) {
+	if m, ok := c.injectCache[tip]; ok {
+		val, ok2 := m[key]
+		return val, ok2
+	}
+	return nil, false
+}
+
+func (c *Context) putCachedInjection(tip reflect.Type, key string, val interface{}) {
+	if _, ok := c.injectCache[tip]; !ok {
+		c.injectCache[tip] = make(map[string]interface{})
+	}
+
+	c.injectCache[tip][key] = val
 }

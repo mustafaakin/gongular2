@@ -3,10 +3,13 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/http"
 
 	"time"
 
 	"io/ioutil"
+
+	"runtime"
 
 	"github.com/gorilla/websocket"
 	"github.com/mustafaakin/gongular2"
@@ -38,23 +41,24 @@ func (s *someRequest) Handle(c *gongular2.Context) error {
 type FileuploadHandler struct {
 	Form struct {
 		File1 *gongular2.UploadedFile
+		Key   string `valid:"required,alphanum"`
 	}
 }
 
 func (f *FileuploadHandler) Handle(c *gongular2.Context) error {
 	b, err := ioutil.ReadAll(f.Form.File1.File)
-	log.Println("file", len(b), err)
+	c.SetBody(fmt.Sprintln("file len", len(b), "key", f.Form.Key, "err", err))
 	return nil
 }
 
 type someOtherRequest struct {
 	Param struct {
-		UserID string `valid:"alphanum"`
+		UserID int8
 	}
 }
 
 func (s *someOtherRequest) Handle(c *gongular2.Context) error {
-	c.SetBody(fmt.Sprintf("hi %s", s.Param.UserID))
+	c.SetBody(fmt.Sprintf("hi %d", s.Param.UserID))
 	return nil
 }
 
@@ -64,8 +68,8 @@ type wsTest struct {
 	}
 }
 
-func (w *wsTest) Before(c *gongular2.Context) error {
-	return nil
+func (w *wsTest) Before(c *gongular2.Context) (http.Header, error) {
+	return nil, nil
 }
 
 func (w *wsTest) Handle(conn *websocket.Conn) {
@@ -89,6 +93,16 @@ func (w *wsTest) Handle(conn *websocket.Conn) {
 	}
 }
 
+type MemoryHandler struct {
+}
+
+func (m *MemoryHandler) Handle(c *gongular2.Context) error {
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	c.SetBody(ms.Alloc / 1024)
+	return nil
+}
+
 func main() {
 	// Create a new router
 	e := gongular2.NewEngine()
@@ -103,6 +117,7 @@ func main() {
 	r.GET("/user/:UserID", &someOtherRequest{})
 	r.GET("/deneme", &deneme.SelamMid{}, &deneme.SelamFn{})
 	r.POST("/filetest", &FileuploadHandler{})
+	r.GET("/memory", &MemoryHandler{})
 
 	// WS Handlers
 	w := e.GetWSRouter()

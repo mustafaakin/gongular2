@@ -1,11 +1,13 @@
 package gongular2
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/julienschmidt/httprouter"
 )
 
+// Engine is the main gongular router wrapper.
 type Engine struct {
 	// The underlying router
 	actualRouter *httprouter.Router
@@ -20,10 +22,15 @@ type Engine struct {
 
 	// The callback for route callbacks
 	callback RouteCallback
+
+	// The error handler
+	errorHandler ErrorHandler
 }
 
+// NewEngine creates a new engine with the proper fields initialized
 func NewEngine() *Engine {
 	e := &Engine{
+		errorHandler: defaultErrorHandler,
 		actualRouter: httprouter.New(),
 		injector:     newInjector(),
 		callback:     DefaultRouteCallback,
@@ -34,10 +41,12 @@ func NewEngine() *Engine {
 	return e
 }
 
+// GetRouter returns the underylying HTTP request router
 func (e *Engine) GetRouter() *Router {
 	return e.httpRouter
 }
 
+// GetWSRouter return the underlying Websocket router
 func (e *Engine) GetWSRouter() *WSRouter {
 	return e.wsRouter
 }
@@ -52,7 +61,7 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	e.actualRouter.ServeHTTP(w, req)
 }
 
-// ListenAndServe
+// ListenAndServe serves the given engine with a specific address. Mainly used for quick testing.
 func (e *Engine) ListenAndServe(addr string) error {
 	return http.ListenAndServe(addr, e.actualRouter)
 }
@@ -65,4 +74,12 @@ func (e *Engine) Provide(value interface{}) {
 // ProvideWithKey provides an interface with a key
 func (e *Engine) ProvideWithKey(key string, value interface{}) {
 	e.injector.Provide(value, key)
+}
+
+// SetErrorHandler sets the error handler
+func (e *Engine) SetErrorHandler(fn ErrorHandler) {
+	if fn == nil {
+		log.Fatal("The error handler cannot be nil")
+	}
+	e.errorHandler = fn
 }

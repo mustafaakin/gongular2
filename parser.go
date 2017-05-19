@@ -2,43 +2,98 @@ package gongular2
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
+	"net/http"
 	"reflect"
 	"strconv"
 	"strings"
+
+	"math"
 
 	"github.com/asaskevich/govalidator"
 )
 
 const (
+	// PlaceParameter is used in ValidationError to indicate the error is in
+	// URL Parameters
 	PlaceParameter = "URL Path Parameter"
-	PlaceQuery     = "Query Parameter"
-	PlaceBody      = "Body"
+	// PlaceQuery is used in ValidationError to indicate the error is in
+	// Query parameters
+	PlaceQuery = "Query Parameter"
+	// PlaceBody is used in ValidationError to indicate the error is in
+	// Body of the request
+	PlaceBody = "Body"
+	// PlaceForm is used in ValidationError to indicate the error is in
+	// submitted form
+	PlaceForm = "Form Value"
 )
 
-func checkIntRange(kind reflect.Kind, val int64) bool {
-	// TODO: int8 -> -127+128 etc
-	return false
+const (
+	// FieldParameter defines the struct field name for looking up URL Parameters
+	FieldParameter = "Param"
+	// FieldBody defines the struct field name for looking up the body of request
+	FieldBody = "Body"
+	// FieldForm defines the struct field name for looking up form of request
+	FieldForm = "Form"
+	// FieldQuery defines the struct field name for looking up QUery Parameters
+	FieldQuery = "Query"
+)
+
+const (
+	// TagInject The field name that is used to lookup injections in the handlers
+	TagInject = "inject"
+)
+
+func compareAndReturnIntAndRanges(val, lower, upper int64) (bool, int64, int64) {
+	result := val >= lower && val <= upper
+	return result, lower, upper
+}
+
+func checkIntRange(kind reflect.Kind, val int64) (bool, int64, int64) {
+	switch kind {
+	case reflect.Int8:
+		return compareAndReturnIntAndRanges(val, math.MinInt8, math.MaxInt8)
+	case reflect.Int16:
+		return compareAndReturnIntAndRanges(val, math.MinInt16, math.MaxInt16)
+	case reflect.Int32:
+		return compareAndReturnIntAndRanges(val, math.MinInt32, math.MaxInt32)
+	case reflect.Int64:
+		return compareAndReturnIntAndRanges(val, math.MinInt64, math.MaxInt64)
+	}
+	// Should not be here
+	return false, math.MinInt64, math.MaxInt64
 }
 
 func parseSimpleParam(s string, place string, field reflect.StructField, val *reflect.Value) error {
-	switch field.Type.Kind() {
+	kind := field.Type.Kind()
+	switch kind {
 	case reflect.String:
 		val.SetString(s)
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		i, err := strconv.ParseInt(s, 10, 64)
 		if err != nil {
 			return ParseError{
+				Place:     place,
 				FieldName: field.Name,
 				Reason:    fmt.Sprintf("The '%s' is not parseable to int", s),
 			}
 		}
+
+		ok, lower, upper := checkIntRange(kind, i)
+		if !ok {
+			return ParseError{
+				Place:     place,
+				FieldName: field.Name,
+				Reason:    fmt.Sprintf("Supplied value %d is not in range [%d, %d]", i, lower, upper),
+			}
+		}
+
 		val.SetInt(i)
 	case reflect.Float32, reflect.Float64:
 		i, err := strconv.ParseFloat(s, 64)
 		if err != nil {
 			return ParseError{
+				Place:     place,
 				FieldName: field.Name,
 				Reason:    fmt.Sprintf("The '%s' is not parseable to float/double", s),
 			}
@@ -74,7 +129,7 @@ func validateStruct(obj reflect.Value, place string) error {
 }
 
 func (c *Context) parseParams(obj reflect.Value) error {
-	param := obj.FieldByName("Param")
+	param := obj.FieldByName(FieldParameter)
 	paramType := param.Type()
 
 	numFields := paramType.NumField()
@@ -90,27 +145,28 @@ func (c *Context) parseParams(obj reflect.Value) error {
 		}
 	}
 
-	return validateStruct(obj, PlaceParameter)
+	return validateStruct(param, PlaceParameter)
 }
 
 func (c *Context) parseBody(handlerObject reflect.Value) error {
 	// Cache body if possible
-	body := handlerObject.FieldByName("Body")
+	body := handlerObject.FieldByName(FieldBody)
 	b := body.Addr().Interface()
 
 	err := json.NewDecoder(c.Request().Body).Decode(b)
+	// TODO: Parse error
 	return err
 }
 
 func (c *Context) parseQuery(obj reflect.Value) error {
-	query := obj.FieldByName("Query")
+	query := obj.FieldByName(FieldQuery)
 	queryType := obj.Type()
 
 	numFields := queryType.NumField()
 	queryValues := c.Request().URL.Query()
 	for i := 0; i < numFields; i++ {
 		field := queryType.Field(i)
-		// TODO: Parse it accordingly, int-string
+
 		s := queryValues.Get(field.Name)
 		val := query.Field(i)
 		err := parseSimpleParam(s, PlaceQuery, field, &val)
@@ -118,31 +174,11 @@ func (c *Context) parseQuery(obj reflect.Value) error {
 			return err
 		}
 	}
-	return nil
+	return validateStruct(query, PlaceQuery)
 }
 
 func (c *Context) parseForm(obj reflect.Value) error {
-	// See if we parsed earlier
-	// TODO: Cache the files in the context so that we do not re-read it unnecessarily
-	contentType := c.Request().Header.Get("Content-Type")
-
-	// TODO: Instead of header-check, check if we have files only
-	if strings.Contains(contentType, "multipart/form-data") {
-		err := c.Request().ParseMultipartForm(10 * 1024 * 1024) // 10 MB??
-		if err != nil {
-			return err
-		}
-	} else if contentType == "application/x-www-form-urlencoded" {
-		err := c.Request().ParseForm()
-		if err != nil {
-			return err
-		}
-	} else {
-		return errors.New("The request's content-type is neither multipart/form-data" +
-			" or application/x-www-form-urlencoded, it is: " + contentType)
-	}
-
-	form := obj.FieldByName("Form")
+	form := obj.FieldByName(FieldForm)
 	formType := form.Type()
 
 	numFields := formType.NumField()
@@ -153,7 +189,15 @@ func (c *Context) parseForm(obj reflect.Value) error {
 		if field.Type == reflect.TypeOf(&UploadedFile{}) {
 			file, header, err := c.Request().FormFile(field.Name)
 
-			if err != nil {
+			// TODO: Make it optional??
+			if err == http.ErrMissingFile {
+				return ParseError{
+					Place:     PlaceForm,
+					FieldName: field.Name,
+					Reason:    "Was expecting a file, but could not found in the request.",
+				}
+			} else if err != nil {
+				// It should be an internal error, therefore we do not wrap with ParseError
 				return err
 			}
 
@@ -166,10 +210,14 @@ func (c *Context) parseForm(obj reflect.Value) error {
 			form.Field(i).Set(reflect.ValueOf(uploadedFile))
 		} else {
 			s := c.Request().FormValue(field.Name)
-			form.Field(i).SetString(s)
+			val := form.Field(i)
+			err := parseSimpleParam(s, PlaceForm, field, &val)
+			if err != nil {
+				return err
+			}
 		}
 	}
-	return nil
+	return validateStruct(form, PlaceForm)
 }
 
 func (c *Context) parseInjections(obj reflect.Value, injector *injector) error {
@@ -181,7 +229,7 @@ func (c *Context) parseInjections(obj reflect.Value, injector *injector) error {
 		name := field.Name
 
 		// We can skip the field if it is a special one
-		if name == "Body" || name == "Param" || name == "Query" || name == "Form" {
+		if name == FieldBody || name == FieldParameter || name == FieldQuery || name == FieldForm {
 			continue
 		}
 
@@ -191,27 +239,38 @@ func (c *Context) parseInjections(obj reflect.Value, injector *injector) error {
 		}
 
 		var key string
-		tag, ok := field.Tag.Lookup("inject")
+		tag, ok := field.Tag.Lookup(TagInject)
 		if !ok {
 			key = "default"
 		} else {
 			key = tag
 		}
 
+		cachedVal, cachedOk := c.getCachedInjection(tip, key)
 		val, directOk := injector.GetDirectValue(tip, key)
 		fn, customOk := injector.GetCustomValue(tip, key)
 
-		if directOk {
+		if cachedOk {
+			obj.Field(i).Set(reflect.ValueOf(cachedVal))
+		} else if directOk {
 			obj.Field(i).Set(reflect.ValueOf(val))
 		} else if customOk {
-			// TODO: Cache the result so that in subsequent requests we do not have to execute the function
 			val, err := fn(c)
 			if err != nil {
-				return errors.New("Could not")
+				return InjectionError{
+					Key:             key,
+					Tip:             tip,
+					UnderlyingError: err,
+				}
 			}
 			obj.Field(i).Set(reflect.ValueOf(val))
+			c.putCachedInjection(tip, key, val)
 		} else {
-			return errors.New("WOW NO SUCH DEPendency")
+			return InjectionError{
+				Key:             key,
+				Tip:             tip,
+				UnderlyingError: ErrNoSuchDependency,
+			}
 		}
 	}
 	return nil

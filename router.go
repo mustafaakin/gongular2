@@ -12,45 +12,50 @@ import (
 	"github.com/julienschmidt/httprouter"
 )
 
-const methodWS = "WEBSOCKET"
-
 // Router holds the required states and does the mapping of requests
 type Router struct {
 	engine *Engine
 
-	errorHandler ErrorHandler
-	prefix       string
-	handlers     []RequestHandler
+	prefix   string
+	handlers []RequestHandler
 }
 
 // NewRouter creates a new gongular2 Router
 func newRouter(e *Engine) *Router {
 	r := Router{
-		engine:       e,
-		errorHandler: defaultErrorHandler,
-		prefix:       "",
-		handlers:     make([]RequestHandler, 0),
+		engine:   e,
+		prefix:   "",
+		handlers: make([]RequestHandler, 0),
 	}
 	return &r
 }
 
-// GET registers the given handlers at the path
+// GET registers the given handlers at the path for a GET request
 func (r *Router) GET(path string, handlers ...RequestHandler) {
 	r.combineAndWrapHandlers(path, http.MethodGet, handlers)
 }
 
-// POST registers the given handlers at the path
+// POST registers the given handlers at the path for a POST request
 func (r *Router) POST(path string, handlers ...RequestHandler) {
 	r.combineAndWrapHandlers(path, http.MethodPost, handlers)
+}
+
+// PUT registers the given handlers at the path for a PUT request
+func (r *Router) PUT(path string, handlers ...RequestHandler) {
+	r.combineAndWrapHandlers(path, http.MethodPut, handlers)
+}
+
+// HEAD registers the given handlers at the path for a HEAD request
+func (r *Router) HEAD(path string, handlers ...RequestHandler) {
+	r.combineAndWrapHandlers(path, http.MethodHead, handlers)
 }
 
 // Group groups a given path with additional interfaces. It is useful to avoid
 // repetitions while defining many paths
 func (r *Router) Group(_path string, handlers ...RequestHandler) *Router {
 	newRouter := &Router{
-		engine:       r.engine,
-		prefix:       path.Join(r.prefix, _path),
-		errorHandler: r.errorHandler,
+		engine: r.engine,
+		prefix: path.Join(r.prefix, _path),
 	}
 
 	// Copy previous handlers references
@@ -100,8 +105,7 @@ func (r *Router) transformRequestHandlers(path string, method string, handlers [
 		middleHandlers[i] = mh
 	}
 
-	var fn httprouter.Handle
-	fn = func(wr http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+	fn := func(wr http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 		st := time.Now()
 		routeStat := RouteStat{
 			Request:     req,
@@ -118,21 +122,21 @@ func (r *Router) transformRequestHandlers(path string, method string, handlers [
 
 		// For each of the handler this route has, try to execute it
 		for idx, handler := range middleHandlers {
-			st := time.Now()
 			hc := HandlerStat{
 				FuncName: handler.name,
 			}
 
 			// Parse the parameters to the handler object
+			stHandler := time.Now()
 			fn := handler.RequestHandler
 			err := fn(ctx)
 
-			hc.Duration = time.Now().Sub(st)
+			hc.Duration = time.Since(stHandler)
 
 			// If an error occurs, stop the chain
 			if err != nil {
 				ctx.StopChain()
-				r.errorHandler(err, ctx)
+				r.engine.errorHandler(err, ctx)
 
 				// Put the route stats
 				hc.Error = err
@@ -145,7 +149,7 @@ func (r *Router) transformRequestHandlers(path string, method string, handlers [
 			// Voluntarily stopped
 			if ctx.stopChain {
 				// Put the route stats
-				hc.Duration = time.Now().Sub(st)
+				hc.Duration = time.Since(st)
 				hc.StopChain = true
 				routeStat.Handlers[idx] = hc
 
@@ -158,7 +162,7 @@ func (r *Router) transformRequestHandlers(path string, method string, handlers [
 		// Save final stats
 		routeStat.ResponseSize = ctx.Finalize()
 		routeStat.ResponseCode = ctx.status
-		routeStat.TotalDuration = time.Now().Sub(st)
+		routeStat.TotalDuration = time.Since(st)
 		routeStat.Logs = buf
 
 		if r.engine.callback != nil {

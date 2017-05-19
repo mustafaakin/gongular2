@@ -39,11 +39,14 @@ func (inj *injector) ProvideCustom(value interface{}, fn CustomProvideFunction, 
 	inj.customProviders[tip][key] = fn
 }
 
+// GetDirectValue returns the directly provided dependency
 func (inj *injector) GetDirectValue(tip reflect.Type, key string) (interface{}, bool) {
+	// TODO: Avoid nil
 	val, ok := inj.values[tip][key]
 	return val, ok
 }
 
+// GetCustomValue returns the CustomProvideFunction for the requested dependency
 func (inj *injector) GetCustomValue(tip reflect.Type, key string) (CustomProvideFunction, bool) {
 	val, ok := inj.customProviders[tip][key]
 	return val, ok

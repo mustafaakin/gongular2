@@ -179,34 +179,31 @@ func (hc *handlerContext) getMiddleRequestHandler(injector *injector) middleRequ
 			if !ok {
 				// It should, it cannot be here
 				return errors.New("The interface does not implement WebsocketHandler: " + hc.tip.Name())
-			} else {
-				err := wsHandler.Before(c)
-				if err != nil {
-					return err
-				}
-
-				var upgrader = websocket.Upgrader{
-					ReadBufferSize:  1024,
-					WriteBufferSize: 1024,
-				}
-
-				conn, err := upgrader.Upgrade(c.w, c.r, nil)
-				if err != nil {
-					return err
-				}
-
-				wsHandler.Handle(conn)
-				return nil
 			}
-		} else {
-			reqHandler, ok := obj.Interface().(RequestHandler)
-			if !ok {
-				// It should, it cannot be here
-				return errors.New("The interface does not implement RequestHandler: " + hc.tip.Name())
-			} else {
-				return reqHandler.Handle(c)
+
+			responseHeader, err := wsHandler.Before(c)
+			if err != nil {
+				return err
 			}
+
+			var upgrader = websocket.Upgrader{}
+
+			conn, err := upgrader.Upgrade(c.w, c.r, responseHeader)
+			if err != nil {
+				return err
+			}
+
+			wsHandler.Handle(conn)
+			return nil
 		}
+
+		// If it is not websocket, it is a HTTP Request
+		reqHandler, ok := obj.Interface().(RequestHandler)
+		if !ok {
+			// It should, it cannot be here
+			return errors.New("The interface does not implement RequestHandler: " + hc.tip.Name())
+		}
+		return reqHandler.Handle(c)
 	}
 	return fn
 }
