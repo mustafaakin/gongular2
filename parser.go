@@ -11,52 +11,25 @@ import (
 	"github.com/asaskevich/govalidator"
 )
 
-type InjectionError struct {
-	Tip             reflect.Type
-	Key             string
-	UnderlyingError error
-}
-
-func (i *InjectionError) Error() string {
-	return fmt.Sprintf("Could not inject type %s with key %s because %s", i.Key, i.Tip, i.UnderlyingError.Error())
-}
-
-type ValidationError struct {
-	Fields   map[string]string
-	Location string
-}
-
-func (v *ValidationError) Error() string {
-	s := []string{}
-	for k, v := range v.Fields {
-		s = append(s, fmt.Sprintf("%s: %s", k, v))
-	}
-	return fmt.Sprintf("Validation error in %s, %s", v.Location, strings.Join(s, ","))
-}
-
-type ParseError struct {
-	Location  string
-	FieldName string
-	Reason    string
-}
-
-func (p *ParseError) Error() string {
-	return fmt.Sprintf("Parse error: %s %s %s", p.Location, p.FieldName, p.Reason)
-}
+const (
+	PlaceParameter = "URL Path Parameter"
+	PlaceQuery     = "Query Parameter"
+	PlaceBody      = "Body"
+)
 
 func checkIntRange(kind reflect.Kind, val int64) bool {
 	// TODO: int8 -> -127+128 etc
 	return false
 }
 
-func parseSimpleParam(s string, field reflect.StructField, val *reflect.Value) *ParseError {
+func parseSimpleParam(s string, place string, field reflect.StructField, val *reflect.Value) error {
 	switch field.Type.Kind() {
 	case reflect.String:
 		val.SetString(s)
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		i, err := strconv.ParseInt(s, 10, 64)
 		if err != nil {
-			return &ParseError{
+			return ParseError{
 				FieldName: field.Name,
 				Reason:    fmt.Sprintf("The '%s' is not parseable to int", s),
 			}
@@ -65,7 +38,7 @@ func parseSimpleParam(s string, field reflect.StructField, val *reflect.Value) *
 	case reflect.Float32, reflect.Float64:
 		i, err := strconv.ParseFloat(s, 64)
 		if err != nil {
-			return &ParseError{
+			return ParseError{
 				FieldName: field.Name,
 				Reason:    fmt.Sprintf("The '%s' is not parseable to float/double", s),
 			}
@@ -78,8 +51,9 @@ func parseSimpleParam(s string, field reflect.StructField, val *reflect.Value) *
 		case "false", "0", "no":
 			val.SetBool(false)
 		default:
-			return &ParseError{
+			return ParseError{
 				FieldName: field.Name,
+				Place:     place,
 				Reason:    fmt.Sprintf("The '%s' is not a boolean", s),
 			}
 		}
@@ -87,13 +61,13 @@ func parseSimpleParam(s string, field reflect.StructField, val *reflect.Value) *
 	return nil
 }
 
-func validateStruct(obj reflect.Value, location string) *ValidationError {
+func validateStruct(obj reflect.Value, place string) error {
 	isValid, err := govalidator.ValidateStruct(obj.Interface())
 	if !isValid {
 		m := govalidator.ErrorsByField(err)
-		return &ValidationError{
-			Location: location,
-			Fields:   m,
+		return ValidationError{
+			Place:  place,
+			Fields: m,
 		}
 	}
 	return nil
@@ -110,16 +84,13 @@ func (c *Context) parseParams(obj reflect.Value) error {
 		// TODO: Parse it accordingly, int-string
 		s := c.Params().ByName(field.Name)
 		val := param.Field(i)
-		err := parseSimpleParam(s, field, &val)
+		err := parseSimpleParam(s, PlaceParameter, field, &val)
 		if err != nil {
-			err.Location = "URL Parameter"
 			return err
 		}
 	}
 
-	err := validateStruct(obj, "Parameter")
-	
-	return nil
+	return validateStruct(obj, PlaceParameter)
 }
 
 func (c *Context) parseBody(handlerObject reflect.Value) error {
@@ -142,9 +113,8 @@ func (c *Context) parseQuery(obj reflect.Value) error {
 		// TODO: Parse it accordingly, int-string
 		s := queryValues.Get(field.Name)
 		val := query.Field(i)
-		err := parseSimpleParam(s, field, &val)
+		err := parseSimpleParam(s, PlaceQuery, field, &val)
 		if err != nil {
-			err.Location = "URL Parameter"
 			return err
 		}
 	}
