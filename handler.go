@@ -88,7 +88,7 @@ func (hc *handlerContext) checkRequestFields(handlerElem reflect.Type) error {
 		return err
 	}
 
-	// TODO: Add path field check?
+	// TODO: Add path field check to see whether path has those variables?
 	err = hc.checkParam(handlerElem)
 	if err != nil {
 		return err

@@ -194,7 +194,7 @@ func (c *Context) parseBody(handlerObject reflect.Value) error {
 
 func (c *Context) parseQuery(obj reflect.Value) error {
 	query := obj.FieldByName(FieldQuery)
-	queryType := obj.Type()
+	queryType := query.Type()
 
 	numFields := queryType.NumField()
 	queryValues := c.Request().URL.Query()
@@ -202,7 +202,13 @@ func (c *Context) parseQuery(obj reflect.Value) error {
 		field := queryType.Field(i)
 
 		s := queryValues.Get(field.Name)
+		if s == "" {
+			// Do not fail right now, it is the job of validator
+			continue
+		}
+
 		val := query.Field(i)
+
 		err := parseSimpleParam(s, PlaceQuery, field, &val)
 		if err != nil {
 			return err

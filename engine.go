@@ -61,6 +61,12 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	e.actualRouter.ServeHTTP(w, req)
 }
 
+// GetHandler returns the underlying router as a http.Handler so that others can embed it if needed, which is
+// useful for tests in our case.
+func (e *Engine) GetHandler() http.Handler {
+	return e.actualRouter
+}
+
 // ListenAndServe serves the given engine with a specific address. Mainly used for quick testing.
 func (e *Engine) ListenAndServe(addr string) error {
 	return http.ListenAndServe(addr, e.actualRouter)
@@ -82,4 +88,10 @@ func (e *Engine) SetErrorHandler(fn ErrorHandler) {
 		log.Fatal("The error handler cannot be nil")
 	}
 	e.errorHandler = fn
+}
+
+// SetRouteCallback sets the callback function that is called when the route ends, which contains stats about the
+// executed functions in that request
+func (e *Engine) SetRouteCallback(fn RouteCallback) {
+	e.callback = fn
 }
