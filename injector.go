@@ -32,8 +32,8 @@ func (inj *injector) Provide(value interface{}, key string) {
 // each time to provide when needed
 func (inj *injector) ProvideCustom(value interface{}, fn CustomProvideFunction, key string) {
 	tip := reflect.TypeOf(value)
-	if inj.values[tip] == nil {
-		inj.values[tip] = make(map[string]interface{})
+	if inj.customProviders[tip] == nil {
+		inj.customProviders[tip] = make(map[string]CustomProvideFunction)
 	}
 
 	inj.customProviders[tip][key] = fn

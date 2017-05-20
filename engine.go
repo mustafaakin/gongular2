@@ -82,6 +82,16 @@ func (e *Engine) ProvideWithKey(key string, value interface{}) {
 	e.injector.Provide(value, key)
 }
 
+// CustomProvide provides with "default" key by calling the supplied CustomProvideFunction each time
+func (e *Engine) CustomProvide(value interface{}, fn CustomProvideFunction) {
+	e.injector.ProvideCustom(value, fn, "default")
+}
+
+// CustomProvide provides with "default" key by calling the supplied CustomProvideFunction each time
+func (e *Engine) CustomProvideWithKey(key string, value interface{}, fn CustomProvideFunction) {
+	e.injector.ProvideCustom(value, fn, key)
+}
+
 // SetErrorHandler sets the error handler
 func (e *Engine) SetErrorHandler(fn ErrorHandler) {
 	if fn == nil {
