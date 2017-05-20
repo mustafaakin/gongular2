@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"math"
-
 	"github.com/asaskevich/govalidator"
 )
 
@@ -44,76 +42,107 @@ const (
 	TagInject = "inject"
 )
 
-func compareAndReturnIntAndRanges(val, lower, upper int64) (bool, int64, int64) {
-	result := val >= lower && val <= upper
-	return result, lower, upper
+func parseInt(kind reflect.Kind, s string, place string, field reflect.StructField, val *reflect.Value) error {
+	i, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return ParseError{
+			Place:     place,
+			FieldName: field.Name,
+			Reason:    fmt.Sprintf("The '%s' is not parseable to a integer", s),
+		}
+	}
+
+	ok, lower, upper := checkIntRange(kind, i)
+	if !ok {
+		return ParseError{
+			Place:     place,
+			FieldName: field.Name,
+			Reason:    fmt.Sprintf("Supplied value %d is not in range [%d, %d]", i, lower, upper),
+		}
+	}
+
+	val.SetInt(i)
+	return nil
 }
 
-func checkIntRange(kind reflect.Kind, val int64) (bool, int64, int64) {
-	switch kind {
-	case reflect.Int8:
-		return compareAndReturnIntAndRanges(val, math.MinInt8, math.MaxInt8)
-	case reflect.Int16:
-		return compareAndReturnIntAndRanges(val, math.MinInt16, math.MaxInt16)
-	case reflect.Int32:
-		return compareAndReturnIntAndRanges(val, math.MinInt32, math.MaxInt32)
-	case reflect.Int64:
-		return compareAndReturnIntAndRanges(val, math.MinInt64, math.MaxInt64)
+func parseUint(kind reflect.Kind, s string, place string, field reflect.StructField, val *reflect.Value) error {
+	i, err := strconv.ParseUint(s, 10, 64)
+	if err != nil {
+		return ParseError{
+			Place:     place,
+			FieldName: field.Name,
+			Reason:    fmt.Sprintf("The '%s' is not parseable to int", s),
+		}
 	}
-	// Should not be here
-	return false, math.MinInt64, math.MaxInt64
+
+	ok, lower, upper := checkUIntRange(kind, i)
+	if !ok {
+		return ParseError{
+			Place:     place,
+			FieldName: field.Name,
+			Reason:    fmt.Sprintf("Supplied value %d is not in range [%d, %d]", i, lower, upper),
+		}
+	}
+
+	val.SetUint(i)
+	return nil
+}
+
+func parseFloat(kind reflect.Kind, s string, place string, field reflect.StructField, val *reflect.Value) error {
+	i, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return ParseError{
+			Place:     place,
+			FieldName: field.Name,
+			Reason:    fmt.Sprintf("The '%s' is not parseable to float/double", s),
+		}
+	}
+
+	ok, lower, upper := checkFloatRange(kind, i)
+	if !ok {
+		return ParseError{
+			Place:     place,
+			FieldName: field.Name,
+			Reason:    fmt.Sprintf("Supplied value %f is not in range [%f, %f]", i, lower, upper),
+		}
+	}
+
+	val.SetFloat(i)
+	return nil
+}
+
+func parseBool(s string, place string, field reflect.StructField, val *reflect.Value) error {
+	switch strings.ToLower(s) {
+	case "true", "1", "yes":
+		val.SetBool(true)
+	case "false", "0", "no":
+		val.SetBool(false)
+	default:
+		return ParseError{
+			FieldName: field.Name,
+			Place:     place,
+			Reason:    fmt.Sprintf("The '%s' is not a boolean", s),
+		}
+	}
+	return nil
 }
 
 func parseSimpleParam(s string, place string, field reflect.StructField, val *reflect.Value) error {
 	kind := field.Type.Kind()
+	var err error
 	switch kind {
 	case reflect.String:
 		val.SetString(s)
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		i, err := strconv.ParseInt(s, 10, 64)
-		if err != nil {
-			return ParseError{
-				Place:     place,
-				FieldName: field.Name,
-				Reason:    fmt.Sprintf("The '%s' is not parseable to int", s),
-			}
-		}
-
-		ok, lower, upper := checkIntRange(kind, i)
-		if !ok {
-			return ParseError{
-				Place:     place,
-				FieldName: field.Name,
-				Reason:    fmt.Sprintf("Supplied value %d is not in range [%d, %d]", i, lower, upper),
-			}
-		}
-
-		val.SetInt(i)
+		err = parseInt(kind, s, place, field, val)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		err = parseUint(kind, s, place, field, val)
 	case reflect.Float32, reflect.Float64:
-		i, err := strconv.ParseFloat(s, 64)
-		if err != nil {
-			return ParseError{
-				Place:     place,
-				FieldName: field.Name,
-				Reason:    fmt.Sprintf("The '%s' is not parseable to float/double", s),
-			}
-		}
-		val.SetFloat(i)
+		err = parseFloat(kind, s, place, field, val)
 	case reflect.Bool:
-		switch strings.ToLower(s) {
-		case "true", "1", "yes":
-			val.SetBool(true)
-		case "false", "0", "no":
-			val.SetBool(false)
-		default:
-			return ParseError{
-				FieldName: field.Name,
-				Place:     place,
-				Reason:    fmt.Sprintf("The '%s' is not a boolean", s),
-			}
-		}
+		err = parseBool(s, place, field, val)
 	}
-	return nil
+	return err
 }
 
 func validateStruct(obj reflect.Value, place string) error {
@@ -136,7 +165,6 @@ func (c *Context) parseParams(obj reflect.Value) error {
 	for i := 0; i < numFields; i++ {
 		field := paramType.Field(i)
 
-		// TODO: Parse it accordingly, int-string
 		s := c.Params().ByName(field.Name)
 		val := param.Field(i)
 		err := parseSimpleParam(s, PlaceParameter, field, &val)
@@ -149,13 +177,19 @@ func (c *Context) parseParams(obj reflect.Value) error {
 }
 
 func (c *Context) parseBody(handlerObject reflect.Value) error {
-	// Cache body if possible
+	// TODO: Cache body if possible?
 	body := handlerObject.FieldByName(FieldBody)
 	b := body.Addr().Interface()
 
 	err := json.NewDecoder(c.Request().Body).Decode(b)
-	// TODO: Parse error
-	return err
+	if err != nil {
+		return ParseError{
+			Place:  PlaceBody,
+			Reason: err.Error(),
+		}
+	}
+
+	return validateStruct(body, PlaceBody)
 }
 
 func (c *Context) parseQuery(obj reflect.Value) error {
@@ -245,33 +279,45 @@ func (c *Context) parseInjections(obj reflect.Value, injector *injector) error {
 		} else {
 			key = tag
 		}
+		fieldObj := obj.Field(i)
 
-		cachedVal, cachedOk := c.getCachedInjection(tip, key)
-		val, directOk := injector.GetDirectValue(tip, key)
-		fn, customOk := injector.GetCustomValue(tip, key)
-
-		if cachedOk {
-			obj.Field(i).Set(reflect.ValueOf(cachedVal))
-		} else if directOk {
-			obj.Field(i).Set(reflect.ValueOf(val))
-		} else if customOk {
-			val, err := fn(c)
-			if err != nil {
-				return InjectionError{
-					Key:             key,
-					Tip:             tip,
-					UnderlyingError: err,
-				}
-			}
-			obj.Field(i).Set(reflect.ValueOf(val))
-			c.putCachedInjection(tip, key, val)
-		} else {
-			return InjectionError{
-				Key:             key,
-				Tip:             tip,
-				UnderlyingError: ErrNoSuchDependency,
-			}
+		err := c.setInjectionForField(tip, key, injector, fieldObj)
+		if err != nil {
+			return nil
 		}
 	}
 	return nil
+}
+
+func (c *Context) setInjectionForField(tip reflect.Type, key string, injector *injector, fieldObj reflect.Value) error {
+	cachedVal, cachedOk := c.getCachedInjection(tip, key)
+	val, directOk := injector.GetDirectValue(tip, key)
+	fn, customOk := injector.GetCustomValue(tip, key)
+
+	if cachedOk {
+		fieldObj.Set(reflect.ValueOf(cachedVal))
+		return nil
+	} else if directOk {
+		fieldObj.Set(reflect.ValueOf(val))
+		return nil
+	} else if customOk {
+		val, err := fn(c)
+		if err != nil {
+			return InjectionError{
+				Key:             key,
+				Tip:             tip,
+				UnderlyingError: err,
+			}
+		}
+		fieldObj.Set(reflect.ValueOf(val))
+		c.putCachedInjection(tip, key, val)
+		return nil
+	}
+
+	// We should not be here if the programmatic check is done correctly, but placed it here anyways
+	return InjectionError{
+		Key:             key,
+		Tip:             tip,
+		UnderlyingError: ErrNoSuchDependency,
+	}
 }

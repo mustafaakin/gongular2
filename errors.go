@@ -63,7 +63,7 @@ func (v ValidationError) Error() string {
 // ParseError occurs whenever the field cannot be parsed, i.e. type mismatch
 type ParseError struct {
 	Place     string
-	FieldName string
+	FieldName string `json:",omitempty"`
 	Reason    string
 }
 
