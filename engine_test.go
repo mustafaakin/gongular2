@@ -1,11 +1,9 @@
 package gongular2
 
 import (
-	"testing"
-
 	"errors"
-
 	"net/http"
+	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -66,4 +64,13 @@ func TestGroup(t *testing.T) {
 
 	resp4, _ := get(t, e, "/api/user/5/wow")
 	assert.Equal(t, http.StatusTeapot, resp4.Code)
+}
+
+func TestEngine_WithDefaultRouteCallback(t *testing.T) {
+	e := NewEngine()
+	e.GetRouter().GET("/", &simpleHandler{})
+
+	resp, content := get(t, e, "/")
+	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, `"selam"`, content)
 }

@@ -289,7 +289,7 @@ func (c *Context) parseInjections(obj reflect.Value, injector *injector) error {
 
 		err := c.setInjectionForField(tip, key, injector, fieldObj)
 		if err != nil {
-			return nil
+			return err
 		}
 	}
 	return nil
